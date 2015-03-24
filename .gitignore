@@ -1,4 +1,6 @@
 *.class
+# Ignore properties-files. Instead use .properties.in to provide useful examples
+*.properties
 
 # Mobile Tools for Java (J2ME)
 .mtj.tmp/
