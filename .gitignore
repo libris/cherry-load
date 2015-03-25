@@ -1,4 +1,6 @@
 *.class
+.idea
+*.iml
 # Ignore properties-files. Instead use .properties.in to provide useful examples
 *.properties
 
