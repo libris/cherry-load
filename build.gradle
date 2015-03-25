@@ -12,7 +12,9 @@ repositories {
 dependencies {
     testCompile group: 'junit', name: 'junit', version: '4.11'
     compile group: 'com.dropbox.core', name: 'dropbox-core-sdk', version: '1.7.7'
-    compile group: 'org.apache.tika', name: 'tika', version: '1.7'
+    compile group: 'org.apache.tika', name: 'tika-core', version: '1.7'
+    compile group: 'org.apache.tika', name: 'tika-parsers', version: '1.7'
     compile group: 'org.apache.httpcomponents', name: 'httpclient', version: '4.4'
+    compile group: 'org.codehaus.jackson', name: 'jackson-mapper-asl', version: '1.9.12'
 
 }
