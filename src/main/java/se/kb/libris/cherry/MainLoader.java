@@ -10,14 +10,17 @@ import org.apache.tika.exception.TikaException;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.parser.ParseContext;
 import org.apache.tika.parser.pdf.PDFParser;
+import org.apache.tika.parser.txt.CharsetDetector;
 import org.codehaus.jackson.map.ObjectMapper;
 import org.codehaus.jackson.type.TypeReference;
 import org.xml.sax.ContentHandler;
 import org.apache.tika.sax.*;
 import org.xml.sax.SAXException;
+import static java.lang.System.*;
 
 import java.io.*;
 import java.lang.reflect.Array;
+import java.text.Normalizer;
 import java.util.*;
 
 /**
@@ -61,6 +64,35 @@ public class MainLoader {
         return accessToken;
     }
 
+    void startFiles() throws DbxException, IOException, SAXException, TikaException{
+        System.out.println("Files in the path:");
+        File basedir = new File("/tmp/archive");
+
+        List<TextData> textContentList = new ArrayList<TextData>();
+        int counter = 0;
+
+        for (File child : basedir.listFiles()) {
+
+            System.out.println("	" + child.getName());
+            String isbn = child.getName().substring(0, child.getName().lastIndexOf(".pdf"));
+            String parentId = findParentId(isbn);
+            //String parentId = findParentId(child.name);
+            if (parentId != null) {
+
+                textContentList.add(new TextData(isbn, parentId, tikaToRide(new FileInputStream(child))));
+                //textContentList.add(new TextData(child.name, parentId, tikaToRide(new FileInputStream("/tmp/pdffen.pdf"))));
+
+                if (++counter % 1 == 0) {
+                    // bulk store what we have every 1000 docs
+                    bulkStore(textContentList);
+                    textContentList.clear();
+                    break;
+                }
+            }
+
+        }
+    }
+
     void start() throws DbxException, IOException, SAXException, TikaException{
         DbxRequestConfig config = new DbxRequestConfig("CherryPie/0.1",
                 Locale.getDefault().toString());
@@ -78,31 +110,69 @@ public class MainLoader {
 
         for (DbxEntry child : listing.children) {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
+            //FileOutputStream out = new FileOutputStream("/tmp/pdffen.pdf");
 
             System.out.println("	" + child.name + ": " + child.toString());
-                /*
-            String parentId = findParentId(child.name);
+            String parentId = "x";
+            //String parentId = findParentId(child.name);
             if (parentId != null) {
+                try {
+                    DbxEntry.File downloadedFile = client.getFile("/excerpts/" + child.name, null, out);
+                    System.out.println("metadatat: " + downloadedFile.toString());
+                    //client.getFile("/excerpt/" + child.name, null, out);
+                } finally {
+                    out.close();
+                }
 
-                client.getFile(child.name, null, out);
                 textContentList.add(new TextData(child.name, parentId, tikaToRide(new ByteArrayInputStream(out.toByteArray()))));
-                if (counter++ % 1000 == 0) {
+                //textContentList.add(new TextData(child.name, parentId, tikaToRide(new FileInputStream("/tmp/pdffen.pdf"))));
+
+                if (++counter % 1 == 0) {
                     // bulk store what we have every 1000 docs
                     bulkStore(textContentList);
                     textContentList.clear();
+                    break;
                 }
             }
-                */
+
         }
     }
 
-    void bulkStore(List<TextData> data) {
+    void bulkStore(List<TextData> data) throws IOException {
+        StringBuilder esdoc = new StringBuilder();
+        for (TextData item : data){
+
+            //esdoc.append(String.format("{ 'index' : { '_id' : '1$', 'parent':  '2$'}}\n", item.identifier, item.parentId));
+            esdoc.append("{\"index\":{\"_id\":\"1\",\"_type\":\"record\"}}\n");
+            esdoc.append("{\"text\":\"Know.\"}\n");
+            esdoc.append("{\"index\":{\"_id\":\""+item.identifier+"\",\"parent\":\""+item.parentId+"\",\"_type\":\"excerpt\"}}\n");
+            Map textMap = new HashMap<String,String>();
+            textMap.put("text", item.textContent);
+            esdoc.append(mapper.writeValueAsString(textMap)+"\n");
+            //esdoc.append("{\"text\":\""+item.textContent+"\"}\n");
+            System.out.println(esdoc.toString());
+        }
+        HttpClient client = HttpClientBuilder.create().build();
+        HttpPost post = new HttpPost("http://localhost:9200/cherry/_bulk");
+        post.setEntity(new StringEntity(esdoc.toString(), "UTF-8"));
+        HttpResponse response = client.execute(post);
+        HashMap<String,Map> json = mapper.readValue(response.getEntity().getContent(), new TypeReference<Map<String, Object>>() {});
+        String result = mapper.writeValueAsString(json);
+        System.out.println("Bulk finished");
+        System.out.println(result);
+        System.out.println("After result");
+
+
+
+
+
         // create a bulk json and put it to ES
     }
 
     String findParentId(String isbn) {
+        isbn = "8866770035";
         HttpClient client = HttpClientBuilder.create().build();
-        HttpPost post = new HttpPost("http://localhost:9200/cherry/book/_search");
+        HttpPost post = new HttpPost("http://hp01.libris.kb.se:9200/cherry/record/_search");
         /* This is groovy.
         Map query = [
                 "query": [
@@ -132,11 +202,12 @@ public class MainLoader {
     String tikaToRide(InputStream is) throws IOException, SAXException, TikaException{
         String pdfContent = null;
         try {
-            ContentHandler contenthandler = new BodyContentHandler();
+            ContentHandler contenthandler = new BodyContentHandler(1010241024);
             Metadata metadata = new Metadata();
             PDFParser pdfparser = new PDFParser();
             pdfparser.parse(is, contenthandler, metadata, new ParseContext());
-            pdfContent = contenthandler.toString();
+            pdfContent = normalizeString(contenthandler.toString()); //.replaceAll("[^\\p{Print}&&\\p{Alnum}]|[\\x6d\\t\\n\\x0B\\f\\r\\x85\\u2028\\u2029]", " ").replace((char)160, ' ').trim();
+
         }
 
         finally {
@@ -144,6 +215,16 @@ public class MainLoader {
         }
         return pdfContent;
     }
+
+    String normalizeString(String inString) throws UnsupportedEncodingException {
+        CharsetDetector cs = new CharsetDetector();
+        cs.setText(inString.getBytes());
+        String sourceEncoding = cs.detect().getName();
+        out.println("sour encoding: "+sourceEncoding);
+
+        return inString.replaceAll("[\\h\\v]", " ").replaceAll("\\s+", " ").trim();
+    }
+
 
     private class TextData {
         String identifier;
@@ -163,7 +244,7 @@ public class MainLoader {
         //String token = ml.getToken();
         //System.out.println(token);
 
-        ml.start();
+        ml.startFiles();
 
 
     }
