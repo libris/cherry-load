@@ -27,42 +27,9 @@ import java.util.*;
  * Created by lisa on 23/03/15.
  */
 public class MainLoader {
-    public MainLoader() {
-        props = new Properties();
-        try {
 
-            props.load(this.getClass().getResourceAsStream("/dropbox.properties"));
-        } catch (IOException ioe){
-            System.err.println("Roev. Could not find properties file.");
-            ioe.printStackTrace();
-        }
-    }
-
-    Properties props;
     final static ObjectMapper mapper = new ObjectMapper();
 
-    public String getToken() throws IOException, DbxException{
-        final String APP_KEY = props.getProperty("client_id");
-        final String APP_SECRET = props.getProperty("client_secret");
-
-        DbxAppInfo appInfo = new DbxAppInfo(APP_KEY, APP_SECRET);
-
-        DbxRequestConfig config = new DbxRequestConfig("CherryPie/0.1",
-                Locale.getDefault().toString());
-        DbxWebAuthNoRedirect webAuth = new DbxWebAuthNoRedirect(config, appInfo);
-
-        // Have the user sign in and authorize your app.
-        String authorizeUrl = webAuth.start();
-        System.out.println("1. Go to: " + authorizeUrl);
-        System.out.println("2. Click \"Allow\" (you might have to log in first)");
-        System.out.println("3. Copy the authorization code.");
-        String code = props.getProperty("code");
-        // This will fail if the user enters an invalid authorization code.
-        DbxAuthFinish authFinish = webAuth.finish(code);
-        String accessToken = authFinish.accessToken;
-        props.setProperty("accessToken", accessToken);
-        return accessToken;
-    }
 
     void startFiles() throws DbxException, IOException, SAXException, TikaException{
         System.out.println("Files in the path:");
@@ -93,99 +60,13 @@ public class MainLoader {
         }
     }
 
-    void start() throws DbxException, IOException, SAXException, TikaException{
-        DbxRequestConfig config = new DbxRequestConfig("CherryPie/0.1",
-                Locale.getDefault().toString());
-        String accessToken = props.getProperty("accessToken");
-        DbxClient client = new DbxClient(config, accessToken);
-        System.out.println("Linked account: " + client.getAccountInfo().displayName);
-
-        DbxEntry.WithChildren listing = client.getMetadataWithChildren("/excerpts");
-        System.out.println("Files in the path:");
-
-
-        List<TextData> textContentList = new ArrayList<TextData>();
-
-        int counter = 0;
-
-        for (DbxEntry child : listing.children) {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            //FileOutputStream out = new FileOutputStream("/tmp/pdffen.pdf");
-
-            System.out.println("	" + child.name + ": " + child.toString());
-            String parentId = "x";
-            //String parentId = findParentId(child.name);
-            if (parentId != null) {
-                try {
-                    DbxEntry.File downloadedFile = client.getFile("/excerpts/" + child.name, null, out);
-                    System.out.println("metadatat: " + downloadedFile.toString());
-                    //client.getFile("/excerpt/" + child.name, null, out);
-                } finally {
-                    out.close();
-                }
-
-                textContentList.add(new TextData(child.name, parentId, tikaToRide(new ByteArrayInputStream(out.toByteArray()))));
-                //textContentList.add(new TextData(child.name, parentId, tikaToRide(new FileInputStream("/tmp/pdffen.pdf"))));
-
-                if (++counter % 1 == 0) {
-                    // bulk store what we have every 1000 docs
-                    bulkStore(textContentList);
-                    textContentList.clear();
-                    break;
-                }
-            }
-
-        }
-    }
-
-    void bulkStore(List<TextData> data) throws IOException {
-        StringBuilder esdoc = new StringBuilder();
-        for (TextData item : data){
-
-            //esdoc.append(String.format("{ 'index' : { '_id' : '1$', 'parent':  '2$'}}\n", item.identifier, item.parentId));
-            esdoc.append("{\"index\":{\"_id\":\"1\",\"_type\":\"record\"}}\n");
-            esdoc.append("{\"text\":\"Know.\"}\n");
-            esdoc.append("{\"index\":{\"_id\":\""+item.identifier+"\",\"parent\":\""+item.parentId+"\",\"_type\":\"excerpt\"}}\n");
-            Map textMap = new HashMap<String,String>();
-            textMap.put("text", item.textContent);
-            esdoc.append(mapper.writeValueAsString(textMap)+"\n");
-            //esdoc.append("{\"text\":\""+item.textContent+"\"}\n");
-            System.out.println(esdoc.toString());
-        }
-        HttpClient client = HttpClientBuilder.create().build();
-        HttpPost post = new HttpPost("http://localhost:9200/cherry/_bulk");
-        post.setEntity(new StringEntity(esdoc.toString(), "UTF-8"));
-        HttpResponse response = client.execute(post);
-        HashMap<String,Map> json = mapper.readValue(response.getEntity().getContent(), new TypeReference<Map<String, Object>>() {});
-        String result = mapper.writeValueAsString(json);
-        System.out.println("Bulk finished");
-        System.out.println(result);
-        System.out.println("After result");
-
-
-
-
-
-        // create a bulk json and put it to ES
-    }
-
     String findParentId(String isbn) {
-        isbn = "8866770035";
         HttpClient client = HttpClientBuilder.create().build();
         HttpPost post = new HttpPost("http://hp01.libris.kb.se:9200/cherry/record/_search");
-        /* This is groovy.
-        Map query = [
-                "query": [
-                        "term" : [ "isbn" : isbn ]
-                ]
-        ]
-        post.setEntity(new StringEntity(mapper.writeValueAsString(query)));
-        */
-        // This is java
         try {
-        post.setEntity(new StringEntity("{ \"query\": { \"term\": { \"isbn\" : \"" + isbn + "\" } } }"));
-        HttpResponse response = client.execute(post);
-        HashMap<String,Map> json = mapper.readValue(response.getEntity().getContent(), new TypeReference<Map<String, Object>>() {});
+            post.setEntity(new StringEntity("{ \"query\": { \"term\": { \"isbn\" : \"" + isbn + "\" } } }"));
+            HttpResponse response = client.execute(post);
+            HashMap<String,Map> json = mapper.readValue(response.getEntity().getContent(), new TypeReference<Map<String, Object>>() {});
             List<Map> hits = (List<Map>)json.get("hits").get("hits");
             return (String)hits.get(0).get("_id");
         } catch (NoSuchElementException nsee) {
@@ -220,9 +101,48 @@ public class MainLoader {
         CharsetDetector cs = new CharsetDetector();
         cs.setText(inString.getBytes());
         String sourceEncoding = cs.detect().getName();
-        out.println("sour encoding: "+sourceEncoding);
+        out.println("source encoding: "+sourceEncoding);
 
         return inString.replaceAll("[\\h\\v]", " ").replaceAll("\\s+", " ").trim();
+    }
+
+    void bulkStore(List<TextData> data) throws IOException {
+        StringBuilder esdoc = new StringBuilder();
+        for (TextData item : data){
+            String idString = "smakprov:" + item.identifier;
+            esdoc.append("{\"index\":{\"_id\":\""+idString+"\",\"parent\":\""+item.parentId+"\",\"_type\":\"excerpt\"}}\n");
+            Map textMap = new HashMap<String,Object>();
+            textMap.put("text", item.textContent);
+            textMap.put("@type", "Excerpt");
+            Map annotationSource = new HashMap<String, String>();
+            annotationSource.put("name", "Smakprov");
+            annotationSource.put("url", "http://www.smakprov.se/bok/"+item.identifier);
+            textMap.put("annotationSource", annotationSource);
+            esdoc.append(mapper.writeValueAsString(textMap)+"\n");
+            //esdoc.append("{\"text\":\""+item.textContent+"\"}\n");
+            System.out.println(esdoc.toString());
+        }
+        HttpClient client = HttpClientBuilder.create().build();
+        HttpPost post = new HttpPost("http://localhost:9200/cherry/_bulk");
+        post.setEntity(new StringEntity(esdoc.toString(), "UTF-8"));
+        HttpResponse response = client.execute(post);
+        HashMap<String,Map> json = mapper.readValue(response.getEntity().getContent(), new TypeReference<Map<String, Object>>() {});
+        String result = mapper.writeValueAsString(json);
+        System.out.println("Bulk finished");
+        System.out.println(result);
+        System.out.println("After result");
+
+    }
+
+
+    public static void main(String[] args) throws Exception {
+        MainLoader ml = new MainLoader();
+        //String token = ml.getToken();
+        //System.out.println(token);
+
+        ml.startFiles();
+
+
     }
 
 
@@ -235,18 +155,6 @@ public class MainLoader {
             this.parentId = parent;
             this.textContent = text;
         }
-    }
-
-
-
-    public static void main(String[] args) throws Exception {
-        MainLoader ml = new MainLoader();
-        //String token = ml.getToken();
-        //System.out.println(token);
-
-        ml.startFiles();
-
-
     }
 
 }
