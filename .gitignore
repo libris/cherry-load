@@ -1,4 +1,5 @@
 *.class
+.gradle
 .idea
 *.iml
 # Ignore properties-files. Instead use .properties.in to provide useful examples
