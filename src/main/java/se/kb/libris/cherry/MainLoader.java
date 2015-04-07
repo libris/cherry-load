@@ -49,15 +49,16 @@ public class MainLoader {
                 textContentList.add(new TextData(isbn, parentId, tikaToRide(new FileInputStream(child))));
                 //textContentList.add(new TextData(child.name, parentId, tikaToRide(new FileInputStream("/tmp/pdffen.pdf"))));
 
-                if (++counter % 1 == 0) {
+                if (++counter % 1000 == 0) {
                     // bulk store what we have every 1000 docs
                     bulkStore(textContentList);
                     textContentList.clear();
-                    break;
                 }
+
             }
 
         }
+        bulkStore(textContentList);
     }
 
     String findParentId(String isbn) {
